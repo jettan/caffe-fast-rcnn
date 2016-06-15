@@ -24,8 +24,11 @@ void DropoutLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
     unsigned int* mask =
         static_cast<unsigned int*>(rand_vec_.mutable_gpu_data());
     caffe_gpu_rng_uniform(count, mask);
+    CUDA_POST_KERNEL_CHECK;
     // set thresholds
     // NOLINT_NEXT_LINE(whitespace/operators)
+/*
+<<<<<<< HEAD
     if (scale_train_) {
       DropoutForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
           count, bottom_data, mask, uint_thres_, scale_, top_data);
@@ -34,6 +37,11 @@ void DropoutLayer<Dtype>::Forward_gpu(const vector<Blob<Dtype>*>& bottom,
           count, bottom_data, mask, uint_thres_, 1.f, top_data);
     }
     CUDA_POST_KERNEL_CHECK;
+=======
+*/
+    DropoutForward<Dtype><<<CAFFE_GET_BLOCKS(count), CAFFE_CUDA_NUM_THREADS>>>(
+        count, bottom_data, mask, uint_thres_, scale_, top_data);
+//>>>>>>> v5_support/bvlc_cub_v4_v5
   } else {
     caffe_copy(count, bottom_data, top_data);
     if (!scale_train_) {

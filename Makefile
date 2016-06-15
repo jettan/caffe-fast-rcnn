@@ -7,12 +7,19 @@ $(error $(CONFIG_FILE) not found. See $(CONFIG_FILE).example.)
 endif
 include $(CONFIG_FILE)
 
+# Rectify input parameters
+ifeq ($(CPU_ONLY),1)
+  USE_CUDNN=0
+endif
+
+PROJECT_DIR=$(PWD)
+
 BUILD_DIR_LINK := $(BUILD_DIR)
 ifeq ($(RELEASE_BUILD_DIR),)
-	RELEASE_BUILD_DIR := .$(BUILD_DIR)_release
+	RELEASE_BUILD_DIR := $(PROJECT_DIR)/.$(BUILD_DIR)_release
 endif
 ifeq ($(DEBUG_BUILD_DIR),)
-	DEBUG_BUILD_DIR := .$(BUILD_DIR)_debug
+	DEBUG_BUILD_DIR := $(PROJECT_DIR)/.$(BUILD_DIR)_debug
 endif
 
 DEBUG ?= 0
@@ -23,6 +30,8 @@ else
 	BUILD_DIR := $(RELEASE_BUILD_DIR)
 	OTHER_BUILD_DIR := $(DEBUG_BUILD_DIR)
 endif
+
+THIRDPARTY_DIR=$(PROJECT_DIR)/3rdparty
 
 # All of the directories containing code.
 SRC_DIRS := $(shell find * -type d -exec bash -c "find {} -maxdepth 1 \
@@ -171,7 +180,7 @@ ifneq ("$(wildcard $(CUDA_DIR)/lib64)","")
 endif
 CUDA_LIB_DIR += $(CUDA_DIR)/lib
 
-INCLUDE_DIRS += $(BUILD_INCLUDE_DIR) ./src ./include
+INCLUDE_DIRS += $(BUILD_INCLUDE_DIR) ./src ./include $(THIRDPARTY_DIR)
 ifneq ($(CPU_ONLY), 1)
 	INCLUDE_DIRS += $(CUDA_INCLUDE_DIR)
 	LIBRARY_DIRS += $(CUDA_LIB_DIR)
@@ -248,6 +257,8 @@ ifeq ($(UNAME), Linux)
 	LINUX := 1
 else ifeq ($(UNAME), Darwin)
 	OSX := 1
+	OSX_MAJOR_VERSION := $(shell sw_vers -productVersion | cut -f 1 -d .)
+	OSX_MINOR_VERSION := $(shell sw_vers -productVersion | cut -f 2 -d .)
 endif
 
 # Linux
@@ -277,15 +288,22 @@ ifeq ($(OSX), 1)
 		endif
 		# clang throws this warning for cuda headers
 		WARNINGS += -Wno-unneeded-internal-declaration
+		# 10.11 strips DYLD_* env vars so link CUDA (rpath is available on 10.5+)
+		OSX_10_OR_LATER   := $(shell [ $(OSX_MAJOR_VERSION) -ge 10 ] && echo true)
+		OSX_10_5_OR_LATER := $(shell [ $(OSX_MINOR_VERSION) -ge 5 ] && echo true)
+		ifeq ($(OSX_10_OR_LATER),true)
+			ifeq ($(OSX_10_5_OR_LATER),true)
+				LDFLAGS += -Wl,-rpath,$(CUDA_LIB_DIR)
+			endif
+		endif
 	endif
 	# gtest needs to use its own tuple to not conflict with clang
 	COMMON_FLAGS += -DGTEST_USE_OWN_TR1_TUPLE=1
 	# boost::thread is called boost_thread-mt to mark multithreading on OS X
 	LIBRARIES += boost_thread-mt
 	# we need to explicitly ask for the rpath to be obeyed
-	DYNAMIC_FLAGS := -install_name @rpath/libcaffe.so
 	ORIGIN := @loader_path
-	VERSIONFLAGS += -Wl,-install_name,$(DYNAMIC_VERSIONED_NAME_SHORT) -Wl,-rpath,$(ORIGIN)/../../build/lib
+	VERSIONFLAGS += -Wl,-install_name,@rpath/$(DYNAMIC_VERSIONED_NAME_SHORT) -Wl,-rpath,$(ORIGIN)/../../build/lib
 else
 	ORIGIN := \$$ORIGIN
 endif
@@ -316,6 +334,8 @@ endif
 # cuDNN acceleration configuration.
 ifeq ($(USE_CUDNN), 1)
 	LIBRARIES += cudnn
+	INCLUDE_DIRS += ${CUDNN_DIR}/include
+	LIBRARY_DIRS += ${CUDNN_DIR}/install/cuda/lib64
 	COMMON_FLAGS += -DUSE_CUDNN
 endif
 
@@ -431,7 +451,7 @@ endif
 # Define build targets
 ##############################
 .PHONY: all lib test clean docs linecount lint lintclean tools examples $(DIST_ALIASES) \
-	py mat py$(PROJECT) mat$(PROJECT) proto runtest \
+	py mat py$(PROJECT) mat$(PROJECT) thirdparty proto runtest \
 	superclean supercleanlist supercleanfiles warn everything
 
 all: lib tools examples
@@ -552,7 +572,7 @@ $(ALL_BUILD_DIRS): | $(BUILD_DIR_LINK)
 
 $(DYNAMIC_NAME): $(OBJS) | $(LIB_BUILD_DIR)
 	@ echo LD -o $@
-	$(Q)$(CXX) -shared -o $@ $(OBJS) $(VERSIONFLAGS) $(LINKFLAGS) $(LDFLAGS) $(DYNAMIC_FLAGS)
+	$(Q)$(CXX) -shared -o $@ $(OBJS) $(VERSIONFLAGS) $(LINKFLAGS) $(LDFLAGS)
 	@ cd $(BUILD_DIR)/lib; rm -f $(DYNAMIC_NAME_SHORT);   ln -s $(DYNAMIC_VERSIONED_NAME_SHORT) $(DYNAMIC_NAME_SHORT)
 
 $(STATIC_NAME): $(OBJS) | $(LIB_BUILD_DIR)
